@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FO4 Champions League - Cúp Anh Em</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.11/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.11/firebase-database-compat.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { 
+                        pastel: { bg: '#f8fafc', blue: '#e0f2fe', card: '#ffffff' }, 
+                        c1: { dark: '#0f172a', gold: '#fbbf24' } 
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px); border: 1px solid #e2e8f0; }
+        input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    </style>
+</head>
+<body class="text-gray-900 min-h-screen p-4 md:p-8">
+    <header class="max-w-6xl mx-auto text-center mb-10 bg-c1-dark text-white p-10 rounded-3xl shadow-2xl border-b-8 border-c1-gold relative overflow-hidden">
+        <div class="relative z-10">
+            <h1 class="text-4xl md:text-5xl font-extrabold uppercase tracking-tighter text-c1-gold mb-2">Cúp Tứ Hùng FO4</h1>
+            <p class="text-blue-200 font-medium opacity-90" id="status-text">Đang kết nối tới máy chủ...</p>
+        </div>
+        <div class="absolute top-0 right-0 p-4 opacity-10 text-8xl font-black italic">FO4</div>
+    </header>
+
+    <div id="setup-section" class="max-w-2xl mx-auto glass-panel p-8 rounded-3xl shadow-xl mb-10 hidden">
+        <h2 class="text-2xl font-bold text-c1-dark mb-6 flex items-center gap-2">🛠 Khởi tạo giải đấu</h2>
+        <div class="flex gap-3 mb-6">
+            <input type="text" id="player-name" placeholder="Tên HLV/Đội bóng..." class="flex-1 p-4 border-2 border-gray-100 rounded-2xl focus:border-c1-gold outline-none transition-all">
+            <button onclick="addPlayer()" class="bg-c1-dark text-white px-8 py-4 rounded-2xl font-bold hover:scale-105 active:scale-95 transition-all">Thêm</button>
+        </div>
+        <ul id="player-list" class="flex flex-wrap gap-3 mb-8"></ul>
+        <div class="space-y-3">
+            <button onclick="generateSchedule()" class="w-full bg-c1-gold text-c1-dark px-6 py-4 rounded-2xl font-black text-lg hover:brightness-110 shadow-lg hidden" id="btn-start">CHỐT DANH SÁCH & XẾP LỊCH</button>
+            <button onclick="resetTournament()" class="w-full text-red-500 font-bold py-2 hover:underline">Xóa giải làm lại từ đầu</button>
+        </div>
+    </div>
+
+    <div id="dashboard" class="hidden max-w-7xl mx-auto grid-cols-1 lg:grid-cols-12 gap-8">
+        <div class="lg:col-span-7 glass-panel p-8 rounded-3xl shadow-sm h-fit border-t-4 border-blue-400">
+            <h2 class="text-3xl font-black text-c1-dark mb-8 flex items-center gap-3">
+                <span class="text-4xl">🏆</span> BẢNG XẾP HẠNG
+            </h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead>
+                        <tr class="text-gray-400 uppercase text-xs tracking-widest border-b-2 border-gray-50">
+                            <th class="pb-4 pl-2">#</th>
+                            <th class="pb-4">Đội bóng</th>
+                            <th class="pb-4 text-center">Trận</th>
+                            <th class="pb-4 text-center">T-H-B</th>
+                            <th class="pb-4 text-center">HS</th>
+                            <th class="pb-4 text-center text-c1-dark">Điểm</th>
+                        </tr>
+                    </thead>
+                    <tbody id="standings-body" class="divide-y divide-gray-50"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="lg:col-span-5 space-y-6">
+            <div class="glass-panel p-8 rounded-3xl shadow-sm border-t-4 border-c1-gold">
+                <h2 class="text-2xl font-black text-c1-dark mb-6 flex items-center gap-3">
+                    <span class="text-3xl">⚽</span> LỊCH THI ĐẤU
+                </h2>
+                <div id="matches-container" class="space-y-8 max-h-[700px] overflow-y-auto pr-2 custom-scrollbar"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Đã add sẵn mã từ ảnh của bạn
+        const firebaseConfig = {
+            apiKey: "AIzaSyBJQPPdOLYAURUQVi34cOw22OSYSEmqcm8",
+            authDomain: "fo4-noi-bo.firebaseapp.com",
+            databaseURL: "https://fo4-noi-bo-default-rtdb.asia-southeast1.firebasedatabase.app", // Link DB tự gen
+            projectId: "fo4-noi-bo",
+            storageBucket: "fo4-noi-bo.firebasestorage.app",
+            messagingSenderId: "752853666965",
+            appId: "1:752853666965:web:ce26074a2c51a61e2d9f9c"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        const isAdmin = new URLSearchParams(window.location.search).get('admin') === 'vip';
+        let players = [], matches = [];
+
+        db.ref('fo4_ranking').on('value', (snap) => {
+            const data = snap.val();
+            document.getElementById('status-text').innerText = "Vòng Bảng: Đá Vòng Tròn 1 Lượt";
+            
+            if (data && data.started) {
+                players = data.players || [];
+                matches = data.matches || [];
+                document.getElementById('setup-section').classList.add('hidden');
+                document.getElementById('dashboard').classList.remove('hidden');
+                document.getElementById('dashboard').classList.add('grid');
+                renderMatches();
+                calculateStandings();
+            } else {
+                document.getElementById('dashboard').classList.add('hidden');
+                if (isAdmin) {
+                    document.getElementById('setup-section').classList.remove('hidden');
+                    renderPlayerList();
+                } else {
+                    document.getElementById('status-text').innerText = "Giải đấu đang chờ Admin khởi tạo...";
+                }
+            }
+        });
+
+        function sync() { if(isAdmin) db.ref('fo4_ranking').set({ started: true, players, matches }); }
+
+        function addPlayer() {
+            const input = document.getElementById('player-name');
+            const name = input.value.trim();
+            if (name && !players.includes(name)) {
+                players.push(name);
+                input.value = '';
+                renderPlayerList();
+            }
+        }
+
+        function renderPlayerList() {
+            const list = document.getElementById('player-list');
+            list.innerHTML = players.map((p, i) => `
+                <li class="bg-blue-50 text-blue-700 px-4 py-2 rounded-xl font-bold flex items-center gap-2 border border-blue-100">
+                    ${p} <span class="cursor-pointer text-red-400 hover:text-red-600" onclick="players.splice(${i}, 1); renderPlayerList();">✕</span>
+                </li>`).join('');
+            document.getElementById('btn-start').style.display = players.length >= 2 ? 'block' : 'none';
+        }
+
+        function generateSchedule() {
+            matches = []; let ps = [...players];
+            if (ps.length % 2 !== 0) ps.push(null);
+            const rounds = ps.length - 1;
+            for (let r = 0; r < rounds; r++) {
+                for (let i = 0; i < ps.length / 2; i++) {
+                    const h = ps[i], a = ps[ps.length - 1 - i];
+                    if (h && a) matches.push({ id: `m_${r}_${i}`, round: r + 1, home: h, away: a, hS: null, aS: null, done: false });
+                }
+                ps.splice(1, 0, ps.pop());
+            }
+            sync();
+        }
+
+        function updateScore(id, side, val) {
+            if(!isAdmin) return;
+            const m = matches.find(x => x.id === id);
+            m[side === 'h' ? 'hS' : 'aS'] = val === '' ? null : parseInt(val);
+            m.done = (m.hS !== null && m.aS !== null);
+            sync();
+        }
+
+        function renderMatches() {
+            const container = document.getElementById('matches-container');
+            const grouped = matches.reduce((acc, m) => { (acc[m.round] = acc[m.round] || []).push(m); return acc; }, {});
+            const readOnly = isAdmin ? '' : 'disabled';
+            const inputStyle = isAdmin ? 'bg-white border-2' : 'bg-gray-100 border-none text-gray-500';
+
+            container.innerHTML = Object.entries(grouped).map(([r, ms]) => `
+                <div class="relative pl-4 border-l-4 border-blue-100">
+                    <div class="text-xs font-black text-blue-400 uppercase tracking-widest mb-4">Vòng ${r}</div>
+                    <div class="space-y-4">
+                        ${ms.map(m => `
+                            <div class="flex items-center justify-between gap-4 p-4 rounded-2xl bg-white border border-gray-50 shadow-sm ${m.done ? 'opacity-60' : ''}">
+                                <div class="flex-1 text-right font-bold text-gray-700 truncate">${m.home}</div>
+                                <div class="flex items-center gap-2">
+                                    <input type="number" ${readOnly} value="${m.hS ?? ''}" onchange="updateScore('${m.id}','h',this.value)" class="w-12 h-12 text-center font-black text-xl rounded-xl focus:border-c1-gold outline-none transition-all ${inputStyle}">
+                                    <span class="text-gray-300 font-bold">:</span>
+                                    <input type="number" ${readOnly} value="${m.aS ?? ''}" onchange="updateScore('${m.id}','a',this.value)" class="w-12 h-12 text-center font-black text-xl rounded-xl focus:border-c1-gold outline-none transition-all ${inputStyle}">
+                                </div>
+                                <div class="flex-1 text-left font-bold text-gray-700 truncate">${m.away}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function calculateStandings() {
+            let s = {};
+            players.forEach(p => s[p] = { name: p, p:0, w:0, d:0, l:0, gf:0, ga:0, gd:0, pts:0 });
+            matches.forEach(m => {
+                if (m.done) {
+                    let h = s[m.home], a = s[m.away];
+                    h.p++; a.p++; h.gf += m.hS; h.ga += m.aS; a.gf += m.aS; a.ga += m.hS;
+                    if (m.hS > m.aS) { h.w++; h.pts += 3; a.l++; }
+                    else if (m.hS < m.aS) { a.w++; a.pts += 3; h.l++; }
+                    else { h.d++; a.d++; h.pts += 1; a.pts += 1; }
+                }
+            });
+            Object.values(s).forEach(x => x.gd = x.gf - x.ga);
+            const sorted = Object.values(s).sort((a,b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf);
+            
+            document.getElementById('standings-body').innerHTML = sorted.map((x, i) => `
+                <tr class="group hover:bg-blue-50/50 transition-colors">
+                    <td class="py-5 pl-2"><span class="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${i<4?'bg-c1-dark text-c1-gold':'bg-gray-100 text-gray-400'}">${i+1}</span></td>
+                    <td class="py-5 font-bold text-gray-800">${x.name}</td>
+                    <td class="py-5 text-center font-medium">${x.p}</td>
+                    <td class="py-5 text-center text-sm text-gray-500">${x.w}-${x.d}-${x.l}</td>
+                    <td class="py-5 text-center font-bold ${x.gd>0?'text-green-500':(x.gd<0?'text-red-400':'text-gray-400')}">${x.gd > 0 ? '+'+x.gd : x.gd}</td>
+                    <td class="py-5 text-center font-black text-xl text-c1-dark">${x.pts}</td>
+                </tr>`).join('');
+        }
+
+        function resetTournament() { if(confirm("Xóa sạch dữ liệu giải đấu?")) db.ref('fo4_ranking').remove(); }
+    </script>
+</body>
+</html>
